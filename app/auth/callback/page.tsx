@@ -10,7 +10,12 @@ export default function AuthCallback() {
 
   useEffect(() => {
     async function handleCallback() {
-      // Supabase JS automatically exchanges the code in the URL for a session
+      // Exchange the PKCE code in the URL for a real session
+      const code = new URLSearchParams(window.location.search).get("code");
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code);
+      }
+
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error || !session) {
