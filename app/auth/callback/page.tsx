@@ -10,10 +10,12 @@ export default function AuthCallback() {
 
   useEffect(() => {
     async function handleCallback() {
-      // Exchange the PKCE code in the URL for a real session
-      const code = new URLSearchParams(window.location.search).get("code");
-      if (code) {
-        await supabase.auth.exchangeCodeForSession(code);
+      const params = new URLSearchParams(window.location.search);
+      const pkceCode = params.get("code");
+      const inviteCode = params.get("invite");
+
+      if (pkceCode) {
+        await supabase.auth.exchangeCodeForSession(pkceCode);
       }
 
       const { data: { session }, error } = await supabase.auth.getSession();
@@ -24,11 +26,41 @@ export default function AuthCallback() {
         return;
       }
 
-      // Check if this user already has a name
+      const userId = session.user.id;
+
+      // Process invite if present
+      if (inviteCode) {
+        setStatus("Joining the trip…");
+        const { data: trip } = await supabase
+          .from("trips")
+          .select("id")
+          .eq("invite_code", inviteCode)
+          .single();
+
+        if (trip) {
+          await supabase.from("trip_members").upsert(
+            { trip_id: trip.id, user_id: userId },
+            { onConflict: "trip_id,user_id" }
+          );
+
+          // Make sure user has a name before landing in the trip
+          const { data: existing } = await supabase
+            .from("users").select("name").eq("id", userId).single();
+
+          if (!existing?.name) {
+            router.push(`/?setup=name&after=/trips/${trip.id}`);
+          } else {
+            router.push(`/trips/${trip.id}`);
+          }
+          return;
+        }
+      }
+
+      // Normal login — check if user needs to set a name
       const { data: existing } = await supabase
         .from("users")
         .select("name")
-        .eq("id", session.user.id)
+        .eq("id", userId)
         .single();
 
       if (existing?.name) {

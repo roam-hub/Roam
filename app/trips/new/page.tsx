@@ -109,6 +109,7 @@ function formatDateRange(start: string, end: string): string | null {
 export default function NewTripPage() {
   const router = useRouter();
   const [tripName, setTripName] = useState("");
+  const [travelMode, setTravelMode] = useState<"drive" | "fly">("fly");
   const [from, setFrom] = useState<Destination>(DESTINATIONS[0]); // Raleigh
   const [to, setTo] = useState<Destination | null>(null);
   const [startDate, setStartDate] = useState("");
@@ -130,8 +131,11 @@ export default function NewTripPage() {
       .from("trips")
       .insert({
         name: tripName.trim(),
+        travel_mode: travelMode,
         from_code: from.code,
+        from_city: from.city,
         to_code: to.code,
+        to_city: to.city,
         dates: formatDateRange(startDate, endDate),
         budget: budget ? parseFloat(budget) : null,
         created_by: user.id,
@@ -189,6 +193,29 @@ export default function NewTripPage() {
             className="w-full rounded-xl border px-3.5 py-3 text-[15px] outline-none"
             style={{ borderColor: "var(--line)", color: "var(--ink)" }}
           />
+        </div>
+
+        {/* Drive / Fly toggle */}
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
+            How are you getting there?
+          </label>
+          <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: "var(--line)" }}>
+            {(["fly", "drive"] as const).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setTravelMode(mode)}
+                className="flex-1 py-3 text-[14px] font-semibold transition"
+                style={{
+                  background: travelMode === mode ? "var(--ink)" : "var(--paper)",
+                  color: travelMode === mode ? "#fff" : "var(--ink-soft)",
+                }}
+              >
+                {mode === "fly" ? "✈ Flying" : "🚗 Driving"}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* From */}

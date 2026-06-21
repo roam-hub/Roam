@@ -62,17 +62,19 @@ export default function Home() {
   async function handleSaveName() {
     setError("");
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
 
     const { error } = await supabase.from("users").upsert({
-      id: user.id,
+      id: session.user.id,
       phone: email,
       name: name.trim(),
     });
     setLoading(false);
     if (error) { setError(error.message); return; }
-    router.push("/trips");
+
+    const after = searchParams.get("after");
+    router.push(after ?? "/trips");
   }
 
   return (

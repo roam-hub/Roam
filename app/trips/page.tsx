@@ -7,8 +7,11 @@ import { supabase } from "@/lib/supabase";
 type Trip = {
   id: string;
   name: string;
+  travel_mode: string | null;
   from_code: string;
+  from_city: string | null;
   to_code: string;
+  to_city: string | null;
   dates: string | null;
   budget: number | null;
 };
@@ -35,7 +38,7 @@ export default function TripsPage() {
         const tripIds = memberRows.map(r => r.trip_id);
         const { data: tripData } = await supabase
           .from("trips")
-          .select("id, name, from_code, to_code, dates, budget")
+          .select("id, name, travel_mode, from_code, from_city, to_code, to_city, dates, budget")
           .in("id", tripIds)
           .order("created_at", { ascending: false });
         setTrips(tripData ?? []);
@@ -105,16 +108,20 @@ export default function TripsPage() {
                 {/* Route row */}
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-semibold" style={{ fontFamily: "var(--font-bricolage)", color: "var(--ink)" }}>
-                    {trip.from_code}
+                    {trip.travel_mode === "drive" ? (trip.from_city ?? trip.from_code) : trip.from_code}
                   </span>
                   <span className="h-[6px] w-[6px] rounded-full flex-shrink-0" style={{ background: "var(--amber)" }} />
                   <span className="flex-1 h-[2px]"
                     style={{ background: "repeating-linear-gradient(90deg,var(--line),var(--line) 4px,transparent 4px,transparent 8px)" }} />
                   <span className="h-[6px] w-[6px] rounded-full flex-shrink-0" style={{ background: "var(--amber)" }} />
                   <span className="text-[13px] font-semibold" style={{ fontFamily: "var(--font-bricolage)", color: "var(--ink)" }}>
-                    {trip.to_code}
+                    {trip.travel_mode === "drive" ? (trip.to_city ?? trip.to_code) : trip.to_code}
                   </span>
                 </div>
+                {/* Mode indicator */}
+                <p className="mt-1.5 text-[10px]" style={{ color: "var(--ink-soft)" }}>
+                  {trip.travel_mode === "drive" ? "🚗 Road trip" : "✈ Flying"}
+                </p>
               </div>
             </div>
           ))}
