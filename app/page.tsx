@@ -67,7 +67,7 @@ export default function Home() {
 
     const { error } = await supabase.from("users").upsert({
       id: session.user.id,
-      phone: email,
+      email: email,
       name: name.trim(),
     });
     setLoading(false);
