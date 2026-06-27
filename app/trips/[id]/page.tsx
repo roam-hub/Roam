@@ -17,7 +17,7 @@ type Trip = {
   invite_code: string;
 };
 
-type Member = { name: string | null };
+type Member = { id: string; name: string | null };
 
 type ItineraryItem = {
   id: string;
@@ -25,6 +25,13 @@ type ItineraryItem = {
   time_minutes: number;
   time_label: string;
   description: string;
+};
+
+type Expense = {
+  id: string;
+  description: string;
+  amount: number;
+  paid_by: string;
 };
 
 const AVATAR_COLORS = ["#ff6a5a", "#13b6a3", "#6c63ff", "#f4ad3d", "#e2513f"];
@@ -38,6 +45,7 @@ export default function TripDetailPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [copied, setCopied] = useState(false);
 
+  // itinerary state
   const [items, setItems] = useState<ItineraryItem[]>([]);
   const [activeDay, setActiveDay] = useState(1);
   const [addingItem, setAddingItem] = useState(false);
@@ -47,6 +55,15 @@ export default function TripDetailPage() {
   const [newDesc, setNewDesc] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"plan" | "budget" | "photos" | "polls" | "crew">("plan");
+
+  // budget state
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [addingExpense, setAddingExpense] = useState(false);
+  const [newExpDesc, setNewExpDesc] = useState("");
+  const [newExpAmount, setNewExpAmount] = useState("");
+  const [newExpPaidBy, setNewExpPaidBy] = useState("");
+  const [editingBudget, setEditingBudget] = useState(false);
+  const [newBudgetAmount, setNewBudgetAmount] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -71,7 +88,7 @@ export default function TripDetailPage() {
         const userIds = memberRows.map(r => r.user_id);
         const { data: userData } = await supabase
           .from("users")
-          .select("name")
+          .select("id, name")
           .in("id", userIds);
         setMembers(userData ?? []);
       }
@@ -83,10 +100,18 @@ export default function TripDetailPage() {
         .order("time_minutes");
       setItems(itemData ?? []);
 
+      const { data: expenseData } = await supabase
+        .from("expenses")
+        .select("id, description, amount, paid_by")
+        .eq("trip_id", id)
+        .order("created_at");
+      setExpenses(expenseData ?? []);
+
       setUserId(session.user.id);
+      setNewExpPaidBy(session.user.id);
     }
 
-    const channel = supabase
+    const itinChannel = supabase
       .channel(`itinerary:${id}`)
       .on("postgres_changes", {
         event: "*",
@@ -105,9 +130,27 @@ export default function TripDetailPage() {
       })
       .subscribe();
 
+    const budgetChannel = supabase
+      .channel(`budget:${id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "expenses",
+        filter: `trip_id=eq.${id}`,
+      }, (payload) => {
+        if (payload.eventType === "INSERT")
+          setExpenses(prev => [...prev, payload.new as Expense]);
+        if (payload.eventType === "DELETE")
+          setExpenses(prev => prev.filter(e => e.id !== (payload.old as Expense).id));
+      })
+      .subscribe();
+
     load();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(itinChannel);
+      supabase.removeChannel(budgetChannel);
+    };
   }, [id, router]);
 
   function copyInviteLink() {
@@ -143,6 +186,33 @@ export default function TripDetailPage() {
     await supabase.from("itinerary_items").delete().eq("id", itemId);
   }
 
+  async function handleAddExpense() {
+    const amt = parseFloat(newExpAmount);
+    if (!newExpDesc.trim() || isNaN(amt) || amt <= 0 || !newExpPaidBy) return;
+    await supabase.from("expenses").insert({
+      trip_id: id,
+      description: newExpDesc.trim(),
+      amount: amt,
+      paid_by: newExpPaidBy,
+    });
+    setNewExpDesc("");
+    setNewExpAmount("");
+    setAddingExpense(false);
+  }
+
+  async function handleDeleteExpense(expId: string) {
+    await supabase.from("expenses").delete().eq("id", expId);
+  }
+
+  async function handleSetBudget() {
+    const amt = parseFloat(newBudgetAmount);
+    if (isNaN(amt) || amt <= 0) return;
+    await supabase.from("trips").update({ budget: amt }).eq("id", id);
+    setTrip(prev => prev ? { ...prev, budget: amt } : prev);
+    setEditingBudget(false);
+    setNewBudgetAmount("");
+  }
+
   if (!trip) return (
     <main className="flex min-h-screen items-center justify-center">
       <p style={{ color: "var(--ink-soft)" }}>Loading…</p>
@@ -152,6 +222,28 @@ export default function TripDetailPage() {
   const fromLabel = trip.travel_mode === "drive" ? (trip.from_city ?? trip.from_code) : trip.from_code;
   const toLabel = trip.travel_mode === "drive" ? (trip.to_city ?? trip.to_code) : trip.to_code;
   const dayItems = items.filter(i => i.day_number === activeDay);
+
+  // budget computed values
+  const totalSpent = expenses.reduce((s, e) => s + e.amount, 0);
+  const N = members.length;
+  const budgetPct = trip.budget ? totalSpent / trip.budget : 0;
+  const remaining = (trip.budget ?? 0) - totalSpent;
+
+  function barColor(pct: number) {
+    if (pct >= 1) return "var(--coral-deep)";
+    if (pct >= 0.9) return "var(--coral)";
+    if (pct >= 0.7) return "var(--amber)";
+    return "var(--teal)";
+  }
+
+  // rounding-safe even split
+  const baseShare = N > 0 ? Math.floor((totalSpent / N) * 100) / 100 : 0;
+  const remainderCents = N > 0 ? Math.round((totalSpent - baseShare * N) * 100) : 0;
+  const balances = members.map((m, i) => {
+    const share = i < remainderCents ? baseShare + 0.01 : baseShare;
+    const paid = expenses.filter(e => e.paid_by === m.id).reduce((s, e) => s + e.amount, 0);
+    return { name: m.name ?? "?", colorIdx: i, balance: Math.round((paid - share) * 100) / 100 };
+  });
 
   return (
     <main className="flex min-h-screen flex-col px-4 py-10 max-w-sm mx-auto">
@@ -391,9 +483,252 @@ export default function TripDetailPage() {
       )}
 
       {activeTab === "budget" && (
-        <div className="mt-8 rounded-2xl border px-5 py-10 text-center"
-          style={{ borderColor: "var(--line)", borderStyle: "dashed" }}>
-          <p className="text-[14px]" style={{ color: "var(--ink-soft)" }}>Budget</p>
+        <div className="mt-6 flex flex-col gap-5">
+
+          {/* Budget goal */}
+          {editingBudget ? (
+            <div
+              className="rounded-[14px] border p-4 flex flex-col gap-3"
+              style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+            >
+              <p className="text-[12px] font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--ink-soft)" }}>
+                Group budget
+              </p>
+              <div className="flex gap-2 items-center">
+                <span className="text-[15px] font-bold" style={{ color: "var(--ink-soft)" }}>$</span>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 2000"
+                  value={newBudgetAmount}
+                  onChange={e => setNewBudgetAmount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSetBudget()}
+                  autoFocus
+                  className="flex-1 rounded-xl border px-3 py-2.5 text-[14px] outline-none"
+                  style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSetBudget}
+                  disabled={!newBudgetAmount || parseFloat(newBudgetAmount) <= 0}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                  style={{ background: "var(--coral)" }}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setEditingBudget(false); setNewBudgetAmount(""); }}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
+                  style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : trip.budget ? (
+            <div
+              className="rounded-[14px] border px-4 py-3.5"
+              style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[12px] font-semibold uppercase tracking-[0.1em]" style={{ color: "var(--ink-soft)" }}>
+                  Group budget
+                </p>
+                <button
+                  onClick={() => { setEditingBudget(true); setNewBudgetAmount(String(trip.budget)); }}
+                  className="text-[12px] font-semibold transition hover:opacity-70"
+                  style={{ color: "var(--coral)" }}
+                >
+                  Edit
+                </button>
+              </div>
+
+              {/* Progress bar */}
+              <div className="flex items-baseline justify-between mb-1.5">
+                <span className="text-[22px] font-bold" style={{ fontFamily: "var(--font-bricolage)", color: "var(--ink)" }}>
+                  ${totalSpent.toFixed(2)}
+                </span>
+                <span className="text-[13px]" style={{ color: "var(--ink-soft)" }}>
+                  of ${trip.budget.toLocaleString()}
+                </span>
+              </div>
+              <div className="h-2.5 w-full rounded-full overflow-hidden" style={{ background: "var(--line)" }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${Math.min(budgetPct, 1) * 100}%`,
+                    background: barColor(budgetPct),
+                  }}
+                />
+              </div>
+              <p
+                className="mt-1.5 text-[12px] font-semibold"
+                style={{ color: remaining >= 0 ? "var(--ink-soft)" : "var(--coral-deep)" }}
+              >
+                {remaining >= 0
+                  ? `$${remaining.toFixed(2)} left to spend`
+                  : `$${Math.abs(remaining).toFixed(2)} over budget`}
+              </p>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditingBudget(true)}
+              className="w-full rounded-[14px] py-4 text-[14px] font-semibold transition hover:opacity-70"
+              style={{ border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }}
+            >
+              + Set a group budget
+            </button>
+          )}
+
+          {/* Expenses list */}
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.1em] mb-2.5" style={{ color: "var(--ink-soft)" }}>
+              Expenses
+            </p>
+            <div className="flex flex-col gap-2">
+              {expenses.length === 0 && !addingExpense && (
+                <p className="text-center text-[13px] py-2" style={{ color: "var(--ink-soft)" }}>
+                  No expenses yet.
+                </p>
+              )}
+              {expenses.map(exp => {
+                const payer = members.find(m => m.id === exp.paid_by);
+                return (
+                  <div
+                    key={exp.id}
+                    className="flex items-center gap-3 rounded-xl px-3.5 py-3"
+                    style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] truncate" style={{ color: "var(--ink)" }}>{exp.description}</p>
+                      <p className="text-[12px] mt-0.5" style={{ color: "var(--ink-soft)" }}>
+                        paid by {payer?.name ?? "someone"}
+                      </p>
+                    </div>
+                    <span className="text-[14px] font-semibold flex-shrink-0" style={{ fontFamily: "var(--font-bricolage)", color: "var(--ink)" }}>
+                      ${exp.amount.toFixed(2)}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteExpense(exp.id)}
+                      className="flex-shrink-0 text-[18px] leading-none transition hover:opacity-80"
+                      style={{ color: "var(--ink-soft)", opacity: 0.35 }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add expense form */}
+            {addingExpense ? (
+              <div
+                className="mt-3 rounded-[14px] border p-4 flex flex-col gap-3"
+                style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+              >
+                <input
+                  type="text"
+                  placeholder="e.g. Airbnb, Gas, Dinner"
+                  value={newExpDesc}
+                  onChange={e => setNewExpDesc(e.target.value)}
+                  autoFocus
+                  className="rounded-xl border px-3.5 py-2.5 text-[14px] outline-none w-full"
+                  style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                />
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center gap-1.5 rounded-xl border px-3 py-2.5"
+                    style={{ borderColor: "var(--line)" }}>
+                    <span className="text-[14px]" style={{ color: "var(--ink-soft)" }}>$</span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={newExpAmount}
+                      onChange={e => setNewExpAmount(e.target.value)}
+                      className="flex-1 outline-none text-[14px] min-w-0"
+                      style={{ color: "var(--ink)" }}
+                    />
+                  </div>
+                  <select
+                    value={newExpPaidBy}
+                    onChange={e => setNewExpPaidBy(e.target.value)}
+                    className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
+                    style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                  >
+                    {members.map(m => (
+                      <option key={m.id} value={m.id}>{m.name ?? "?"}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddExpense}
+                    disabled={!newExpDesc.trim() || !newExpAmount || parseFloat(newExpAmount) <= 0}
+                    className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                    style={{ background: "var(--coral)" }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => { setAddingExpense(false); setNewExpDesc(""); setNewExpAmount(""); }}
+                    className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
+                    style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAddingExpense(true)}
+                className="mt-3 w-full rounded-[13px] py-3 text-[14px] font-semibold transition hover:opacity-70"
+                style={{ border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }}
+              >
+                + Log an expense
+              </button>
+            )}
+          </div>
+
+          {/* Who owes the group pot */}
+          {expenses.length > 0 && N > 0 && (
+            <div>
+              <p className="text-[12px] font-semibold uppercase tracking-[0.1em] mb-2.5" style={{ color: "var(--ink-soft)" }}>
+                Who owes the group pot
+              </p>
+              <div className="flex flex-col gap-2">
+                {balances.map((b, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 rounded-xl px-3.5 py-3"
+                    style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
+                  >
+                    <div
+                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
+                      style={{ background: AVATAR_COLORS[b.colorIdx % AVATAR_COLORS.length], fontFamily: "var(--font-bricolage)" }}
+                    >
+                      {b.name[0].toUpperCase()}
+                    </div>
+                    <span className="flex-1 text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
+                      {b.name}
+                    </span>
+                    {b.balance === 0 ? (
+                      <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>settled ✓</span>
+                    ) : b.balance > 0 ? (
+                      <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>
+                        is owed ${b.balance.toFixed(2)}
+                      </span>
+                    ) : (
+                      <span className="text-[13px] font-semibold" style={{ color: "var(--coral-deep)" }}>
+                        owes ${Math.abs(b.balance).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
