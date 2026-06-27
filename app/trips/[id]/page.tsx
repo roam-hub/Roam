@@ -46,6 +46,7 @@ export default function TripDetailPage() {
   const [newPeriod, setNewPeriod] = useState<"AM" | "PM">("AM");
   const [newDesc, setNewDesc] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"plan" | "budget" | "photos" | "polls" | "crew">("plan");
 
   useEffect(() => {
     async function load() {
@@ -83,29 +84,30 @@ export default function TripDetailPage() {
       setItems(itemData ?? []);
 
       setUserId(session.user.id);
-
-      const channel = supabase
-        .channel(`itinerary:${id}`)
-        .on("postgres_changes", {
-          event: "*",
-          schema: "public",
-          table: "itinerary_items",
-          filter: `trip_id=eq.${id}`,
-        }, (payload) => {
-          if (payload.eventType === "INSERT") {
-            setItems(prev =>
-              [...prev, payload.new as ItineraryItem].sort((a, b) => a.time_minutes - b.time_minutes)
-            );
-          }
-          if (payload.eventType === "DELETE") {
-            setItems(prev => prev.filter(i => i.id !== (payload.old as ItineraryItem).id));
-          }
-        })
-        .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
     }
+
+    const channel = supabase
+      .channel(`itinerary:${id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "itinerary_items",
+        filter: `trip_id=eq.${id}`,
+      }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          setItems(prev =>
+            [...prev, payload.new as ItineraryItem].sort((a, b) => a.time_minutes - b.time_minutes)
+          );
+        }
+        if (payload.eventType === "DELETE") {
+          setItems(prev => prev.filter(i => i.id !== (payload.old as ItineraryItem).id));
+        }
+      })
+      .subscribe();
+
     load();
+
+    return () => { supabase.removeChannel(channel); };
   }, [id, router]);
 
   function copyInviteLink() {
@@ -243,137 +245,164 @@ export default function TripDetailPage() {
         </button>
       </div>
 
-      {/* Itinerary section */}
-      <div className="mt-8">
-        <p className="text-[12px] font-semibold uppercase tracking-[0.1em] mb-3" style={{ color: "var(--ink-soft)" }}>
-          Itinerary
-        </p>
-
-        {/* Day chips */}
-        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
-          {[1,2,3,4,5,6,7].map(day => (
-            <button
-              key={day}
-              onClick={() => { setActiveDay(day); setAddingItem(false); }}
-              className="flex-shrink-0 rounded-full px-4 py-1.5 text-[13px] font-semibold transition"
-              style={{
-                background: activeDay === day ? "var(--ink)" : "transparent",
-                color: activeDay === day ? "#fff" : "var(--ink-soft)",
-                border: `1.5px solid ${activeDay === day ? "var(--ink)" : "var(--line)"}`,
-              }}
-            >
-              Day {day}
-            </button>
-          ))}
-        </div>
-
-        {/* Items list */}
-        <div className="mt-3 flex flex-col gap-2">
-          {dayItems.length === 0 && !addingItem && (
-            <p className="text-center text-[13px] py-3" style={{ color: "var(--ink-soft)" }}>
-              Nothing planned yet.
-            </p>
-          )}
-          {dayItems.map(item => (
-            <div
-              key={item.id}
-              className="flex items-start gap-3 rounded-xl px-3.5 py-3"
-              style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
-            >
-              <span
-                className="text-[12px] font-semibold flex-shrink-0 mt-0.5 w-[68px]"
-                style={{ color: "var(--coral-deep)", fontFamily: "var(--font-bricolage)" }}
-              >
-                {item.time_label}
-              </span>
-              <span className="flex-1 text-[14px]" style={{ color: "var(--ink)" }}>
-                {item.description}
-              </span>
-              <button
-                onClick={() => handleDelete(item.id)}
-                className="flex-shrink-0 text-[18px] leading-none transition hover:opacity-80"
-                style={{ color: "var(--ink-soft)", opacity: 0.35 }}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Add form or button */}
-        {addingItem ? (
-          <div
-            className="mt-3 rounded-[14px] border p-4 flex flex-col gap-3"
-            style={{ borderColor: "var(--line)", background: "var(--paper)" }}
-          >
-            {/* Time dropdowns */}
-            <div className="flex gap-2">
-              <select
-                value={newHour}
-                onChange={e => setNewHour(e.target.value)}
-                className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
-                style={{ borderColor: "var(--line)", color: "var(--ink)" }}
-              >
-                {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-              </select>
-              <select
-                value={newMinute}
-                onChange={e => setNewMinute(e.target.value)}
-                className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
-                style={{ borderColor: "var(--line)", color: "var(--ink)" }}
-              >
-                {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <select
-                value={newPeriod}
-                onChange={e => setNewPeriod(e.target.value as "AM" | "PM")}
-                className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
-                style={{ borderColor: "var(--line)", color: "var(--ink)" }}
-              >
-                <option value="AM">AM</option>
-                <option value="PM">PM</option>
-              </select>
-            </div>
-            {/* Description */}
-            <input
-              type="text"
-              placeholder="e.g. Hike to Clingmans Dome"
-              value={newDesc}
-              onChange={e => setNewDesc(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleAddItem()}
-              autoFocus
-              className="rounded-xl border px-3.5 py-2.5 text-[14px] outline-none w-full"
-              style={{ borderColor: "var(--line)", color: "var(--ink)" }}
-            />
-            {/* Buttons */}
-            <div className="flex gap-2">
-              <button
-                onClick={handleAddItem}
-                disabled={!newDesc.trim()}
-                className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-                style={{ background: "var(--coral)" }}
-              >
-                Save
-              </button>
-              <button
-                onClick={() => { setAddingItem(false); setNewDesc(""); }}
-                className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
-                style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
+      {/* Tab bar */}
+      <div className="mt-8 flex overflow-x-auto border-b" style={{ borderColor: "var(--line)" }}>
+        {(["plan", "budget", "photos", "polls", "crew"] as const).map(tab => (
           <button
-            onClick={() => setAddingItem(true)}
-            className="mt-3 w-full rounded-[13px] py-3 text-[14px] font-semibold transition hover:opacity-70"
-            style={{ border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }}
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className="flex-shrink-0 px-3 py-2.5 text-[13px] font-semibold capitalize transition"
+            style={{
+              color: activeTab === tab ? "var(--coral)" : "var(--ink-soft)",
+              borderBottom: activeTab === tab ? "2px solid var(--coral)" : "2px solid transparent",
+              marginBottom: -1,
+            }}
           >
-            + Add a plan
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
-        )}
+        ))}
       </div>
+
+      {/* Tab content */}
+      {activeTab === "plan" && (
+        <div className="mt-6">
+          {/* Day chips */}
+          <div className="flex flex-col gap-2">
+            {[1,2,3,4,5,6,7].map(day => (
+              <button
+                key={day}
+                onClick={() => { setActiveDay(day); setAddingItem(false); }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold text-left transition"
+                style={{
+                  background: activeDay === day ? "var(--ink)" : "transparent",
+                  color: activeDay === day ? "#fff" : "var(--ink-soft)",
+                  border: `1.5px solid ${activeDay === day ? "var(--ink)" : "var(--line)"}`,
+                }}
+              >
+                Day {day}
+              </button>
+            ))}
+          </div>
+
+          {/* Items list */}
+          <div className="mt-3 flex flex-col gap-2">
+            {dayItems.length === 0 && !addingItem && (
+              <p className="text-center text-[13px] py-3" style={{ color: "var(--ink-soft)" }}>
+                Nothing planned yet.
+              </p>
+            )}
+            {dayItems.map(item => (
+              <div
+                key={item.id}
+                className="flex items-start gap-3 rounded-xl px-3.5 py-3"
+                style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
+              >
+                <span
+                  className="text-[12px] font-semibold flex-shrink-0 mt-0.5 w-[68px]"
+                  style={{ color: "var(--coral-deep)", fontFamily: "var(--font-bricolage)" }}
+                >
+                  {item.time_label}
+                </span>
+                <span className="flex-1 text-[14px]" style={{ color: "var(--ink)" }}>
+                  {item.description}
+                </span>
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  className="flex-shrink-0 text-[18px] leading-none transition hover:opacity-80"
+                  style={{ color: "var(--ink-soft)", opacity: 0.35 }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Add form or button */}
+          {addingItem ? (
+            <div
+              className="mt-3 rounded-[14px] border p-4 flex flex-col gap-3"
+              style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+            >
+              <div className="flex gap-2">
+                <select
+                  value={newHour}
+                  onChange={e => setNewHour(e.target.value)}
+                  className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
+                  style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                >
+                  {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select
+                  value={newMinute}
+                  onChange={e => setNewMinute(e.target.value)}
+                  className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
+                  style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                >
+                  {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select
+                  value={newPeriod}
+                  onChange={e => setNewPeriod(e.target.value as "AM" | "PM")}
+                  className="flex-1 rounded-xl border px-2.5 py-2.5 text-[14px] outline-none"
+                  style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+              <input
+                type="text"
+                placeholder="e.g. Hike to Clingmans Dome"
+                value={newDesc}
+                onChange={e => setNewDesc(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleAddItem()}
+                autoFocus
+                className="rounded-xl border px-3.5 py-2.5 text-[14px] outline-none w-full"
+                style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddItem}
+                  disabled={!newDesc.trim()}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                  style={{ background: "var(--coral)" }}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setAddingItem(false); setNewDesc(""); }}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
+                  style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingItem(true)}
+              className="mt-3 w-full rounded-[13px] py-3 text-[14px] font-semibold transition hover:opacity-70"
+              style={{ border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }}
+            >
+              + Add a plan
+            </button>
+          )}
+        </div>
+      )}
+
+      {activeTab === "budget" && (
+        <div className="mt-8 rounded-2xl border px-5 py-10 text-center"
+          style={{ borderColor: "var(--line)", borderStyle: "dashed" }}>
+          <p className="text-[14px]" style={{ color: "var(--ink-soft)" }}>Budget</p>
+        </div>
+      )}
+
+      {(activeTab === "photos" || activeTab === "polls" || activeTab === "crew") && (
+        <div className="mt-8 rounded-2xl border px-5 py-10 text-center"
+          style={{ borderColor: "var(--line)", borderStyle: "dashed" }}>
+          <p className="text-[14px]" style={{ color: "var(--ink-soft)" }}>Coming soon</p>
+        </div>
+      )}
     </main>
   );
 }
