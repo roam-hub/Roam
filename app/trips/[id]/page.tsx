@@ -17,7 +17,12 @@ type Trip = {
   invite_code: string;
 };
 
-type Member = { id: string; name: string | null };
+type Member = {
+  id: string;
+  name: string | null;
+  venmo_username: string | null;
+  cashapp_cashtag: string | null;
+};
 
 type ItineraryItem = {
   id: string;
@@ -32,6 +37,27 @@ type Expense = {
   description: string;
   amount: number;
   paid_by: string;
+};
+
+type Poll = {
+  id: string;
+  question: string;
+  created_by: string | null;
+  created_at: string;
+};
+
+type PollOption = {
+  id: string;
+  poll_id: string;
+  text: string;
+  position: number;
+};
+
+type PollVote = {
+  id: string;
+  poll_id: string;
+  option_id: string;
+  user_id: string;
 };
 
 const AVATAR_COLORS = ["#ff6a5a", "#13b6a3", "#6c63ff", "#f4ad3d", "#e2513f"];
@@ -65,6 +91,19 @@ export default function TripDetailPage() {
   const [editingBudget, setEditingBudget] = useState(false);
   const [newBudgetAmount, setNewBudgetAmount] = useState("");
 
+  // payment handle state
+  const [editingHandles, setEditingHandles] = useState(false);
+  const [newVenmo, setNewVenmo] = useState("");
+  const [newCashapp, setNewCashapp] = useState("");
+
+  // polls state
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [pollOptions, setPollOptions] = useState<PollOption[]>([]);
+  const [pollVotes, setPollVotes] = useState<PollVote[]>([]);
+  const [creatingPoll, setCreatingPoll] = useState(false);
+  const [newPollQuestion, setNewPollQuestion] = useState("");
+  const [newPollOptions, setNewPollOptions] = useState(["", ""]);
+
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession();
@@ -88,7 +127,7 @@ export default function TripDetailPage() {
         const userIds = memberRows.map(r => r.user_id);
         const { data: userData } = await supabase
           .from("users")
-          .select("id, name")
+          .select("id, name, venmo_username, cashapp_cashtag")
           .in("id", userIds);
         setMembers(userData ?? []);
       }
@@ -107,6 +146,24 @@ export default function TripDetailPage() {
         .order("created_at");
       setExpenses(expenseData ?? []);
 
+      const { data: pollData } = await supabase
+        .from("polls").select("id, question, created_by, created_at")
+        .eq("trip_id", id).order("created_at");
+      setPolls(pollData ?? []);
+
+      if ((pollData ?? []).length > 0) {
+        const pollIds = pollData!.map(p => p.id);
+        const { data: optData } = await supabase
+          .from("poll_options").select("id, poll_id, text, position")
+          .in("poll_id", pollIds).order("position");
+        setPollOptions(optData ?? []);
+
+        const { data: voteData } = await supabase
+          .from("poll_votes").select("id, poll_id, option_id, user_id")
+          .in("poll_id", pollIds);
+        setPollVotes(voteData ?? []);
+      }
+
       setUserId(session.user.id);
       setNewExpPaidBy(session.user.id);
     }
@@ -120,8 +177,11 @@ export default function TripDetailPage() {
         filter: `trip_id=eq.${id}`,
       }, (payload) => {
         if (payload.eventType === "INSERT") {
+          const incoming = payload.new as ItineraryItem;
           setItems(prev =>
-            [...prev, payload.new as ItineraryItem].sort((a, b) => a.time_minutes - b.time_minutes)
+            prev.some(i => i.id === incoming.id)
+              ? prev
+              : [...prev, incoming].sort((a, b) => a.time_minutes - b.time_minutes)
           );
         }
         if (payload.eventType === "DELETE") {
@@ -145,11 +205,45 @@ export default function TripDetailPage() {
       })
       .subscribe();
 
+    const pollsChannel = supabase
+      .channel(`polls:${id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "polls",
+        filter: `trip_id=eq.${id}` }, (payload) => {
+        if (payload.eventType === "INSERT")
+          setPolls(prev => [...prev, payload.new as Poll]);
+        if (payload.eventType === "DELETE") {
+          const gone = (payload.old as Poll).id;
+          setPolls(prev => prev.filter(p => p.id !== gone));
+          setPollOptions(prev => prev.filter(o => o.poll_id !== gone));
+          setPollVotes(prev => prev.filter(v => v.poll_id !== gone));
+        }
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "poll_options" }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          const incoming = payload.new as PollOption;
+          setPollOptions(prev =>
+            prev.some(o => o.id === incoming.id)
+              ? prev
+              : [...prev, incoming].sort((a, b) => a.position - b.position)
+          );
+        }
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "poll_votes" }, (payload) => {
+        if (payload.eventType === "INSERT")
+          setPollVotes(prev => [...prev, payload.new as PollVote]);
+        if (payload.eventType === "UPDATE")
+          setPollVotes(prev => prev.map(v => v.id === (payload.new as PollVote).id ? payload.new as PollVote : v));
+        if (payload.eventType === "DELETE")
+          setPollVotes(prev => prev.filter(v => v.id !== (payload.old as PollVote).id));
+      })
+      .subscribe();
+
     load();
 
     return () => {
       supabase.removeChannel(itinChannel);
       supabase.removeChannel(budgetChannel);
+      supabase.removeChannel(pollsChannel);
     };
   }, [id, router]);
 
@@ -170,14 +264,21 @@ export default function TripDetailPage() {
   async function handleAddItem() {
     if (!newDesc.trim() || !userId) return;
     const { time_minutes, time_label } = buildTime(newHour, newMinute, newPeriod);
-    await supabase.from("itinerary_items").insert({
+    const { data: inserted } = await supabase.from("itinerary_items").insert({
       trip_id: id,
       day_number: activeDay,
       time_minutes,
       time_label,
       description: newDesc.trim(),
       created_by: userId,
-    });
+    }).select("id, day_number, time_minutes, time_label, description").single();
+    if (inserted) {
+      setItems(prev =>
+        prev.some(i => i.id === inserted.id)
+          ? prev
+          : [...prev, inserted].sort((a, b) => a.time_minutes - b.time_minutes)
+      );
+    }
     setNewDesc("");
     setAddingItem(false);
   }
@@ -213,6 +314,73 @@ export default function TripDetailPage() {
     setNewBudgetAmount("");
   }
 
+  async function handleSaveHandles() {
+    if (!userId) return;
+    const venmo = newVenmo.trim().replace(/^@/, "");
+    const cashapp = newCashapp.trim().replace(/^\$/, "");
+    await supabase.from("users")
+      .update({ venmo_username: venmo || null, cashapp_cashtag: cashapp || null })
+      .eq("id", userId);
+    setMembers(prev => prev.map(m =>
+      m.id === userId
+        ? { ...m, venmo_username: venmo || null, cashapp_cashtag: cashapp || null }
+        : m
+    ));
+    setEditingHandles(false);
+  }
+
+  async function handleCreatePoll() {
+    const question = newPollQuestion.trim();
+    const opts = newPollOptions.map(o => o.trim()).filter(Boolean);
+    if (!question || opts.length < 2 || !userId) return;
+    const { data: poll } = await supabase
+      .from("polls").insert({ trip_id: id, question, created_by: userId })
+      .select("id").single();
+    if (!poll) return;
+    await supabase.from("poll_options").insert(
+      opts.map((text, i) => ({ poll_id: poll.id, text, position: i }))
+    );
+    // fetch options immediately so they render without waiting for realtime delivery
+    const { data: freshOpts } = await supabase
+      .from("poll_options").select("id, poll_id, text, position")
+      .eq("poll_id", poll.id).order("position");
+    setPollOptions(prev => {
+      const merged = [...prev, ...(freshOpts ?? [])];
+      return merged.filter((o, i) => merged.findIndex(x => x.id === o.id) === i);
+    });
+    setNewPollQuestion("");
+    setNewPollOptions(["", ""]);
+    setCreatingPoll(false);
+  }
+
+  async function handleVote(pollId: string, optionId: string) {
+    if (!userId) return;
+    const existing = pollVotes.find(v => v.poll_id === pollId && v.user_id === userId);
+    if (existing) {
+      if (existing.option_id === optionId) {
+        await supabase.from("poll_votes").delete().eq("id", existing.id);
+      } else {
+        await supabase.from("poll_votes").update({ option_id: optionId }).eq("id", existing.id);
+      }
+    } else {
+      await supabase.from("poll_votes").insert({ poll_id: pollId, option_id: optionId, user_id: userId });
+    }
+  }
+
+  async function handleDeletePoll(pollId: string) {
+    await supabase.from("polls").delete().eq("id", pollId);
+    setPolls(prev => prev.filter(p => p.id !== pollId));
+    setPollOptions(prev => prev.filter(o => o.poll_id !== pollId));
+    setPollVotes(prev => prev.filter(v => v.poll_id !== pollId));
+  }
+
+  function openHandlesForm() {
+    const me = members.find(m => m.id === userId);
+    setNewVenmo(me?.venmo_username ?? "");
+    setNewCashapp(me?.cashapp_cashtag ?? "");
+    setEditingHandles(true);
+  }
+
   if (!trip) return (
     <main className="flex min-h-screen items-center justify-center">
       <p style={{ color: "var(--ink-soft)" }}>Loading…</p>
@@ -242,8 +410,17 @@ export default function TripDetailPage() {
   const balances = members.map((m, i) => {
     const share = i < remainderCents ? baseShare + 0.01 : baseShare;
     const paid = expenses.filter(e => e.paid_by === m.id).reduce((s, e) => s + e.amount, 0);
-    return { name: m.name ?? "?", colorIdx: i, balance: Math.round((paid - share) * 100) / 100 };
+    return {
+      member: m,
+      name: m.name ?? "?",
+      colorIdx: i,
+      balance: Math.round((paid - share) * 100) / 100,
+    };
   });
+
+  const me = members.find(m => m.id === userId);
+  const meHasNoHandles = me && !me.venmo_username && !me.cashapp_cashtag;
+  const note = encodeURIComponent(`Roam: ${trip.name}`);
 
   return (
     <main className="flex min-h-screen flex-col px-4 py-10 max-w-sm mx-auto">
@@ -339,7 +516,7 @@ export default function TripDetailPage() {
 
       {/* Tab bar */}
       <div className="mt-8 flex overflow-x-auto border-b" style={{ borderColor: "var(--line)" }}>
-        {(["plan", "budget", "photos", "polls", "crew"] as const).map(tab => (
+        {(["plan", "budget", "polls", "crew", "photos"] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -359,12 +536,12 @@ export default function TripDetailPage() {
       {activeTab === "plan" && (
         <div className="mt-6">
           {/* Day chips */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-2">
             {[1,2,3,4,5,6,7].map(day => (
               <button
                 key={day}
                 onClick={() => { setActiveDay(day); setAddingItem(false); }}
-                className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold text-left transition"
+                className="rounded-xl px-4 py-2 text-[13px] font-semibold transition"
                 style={{
                   background: activeDay === day ? "var(--ink)" : "transparent",
                   color: activeDay === day ? "#fff" : "var(--ink-soft)",
@@ -485,6 +662,83 @@ export default function TripDetailPage() {
       {activeTab === "budget" && (
         <div className="mt-6 flex flex-col gap-5">
 
+          {/* Payment handles prompt */}
+          {editingHandles ? (
+            <div
+              className="rounded-[14px] border p-4 flex flex-col gap-3"
+              style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+            >
+              <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>
+                Your payment handles
+              </p>
+              <div className="flex items-center gap-2 rounded-xl border px-3 py-2.5" style={{ borderColor: "var(--line)" }}>
+                <span className="text-[13px] font-semibold w-16 flex-shrink-0" style={{ color: "var(--ink-soft)" }}>Venmo</span>
+                <input
+                  type="text"
+                  placeholder="username"
+                  value={newVenmo}
+                  onChange={e => setNewVenmo(e.target.value)}
+                  autoFocus
+                  className="flex-1 outline-none text-[14px]"
+                  style={{ color: "var(--ink)" }}
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border px-3 py-2.5" style={{ borderColor: "var(--line)" }}>
+                <span className="text-[13px] font-semibold w-16 flex-shrink-0" style={{ color: "var(--ink-soft)" }}>Cash App</span>
+                <input
+                  type="text"
+                  placeholder="$cashtag"
+                  value={newCashapp}
+                  onChange={e => setNewCashapp(e.target.value)}
+                  className="flex-1 outline-none text-[14px]"
+                  style={{ color: "var(--ink)" }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveHandles}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90"
+                  style={{ background: "var(--coral)" }}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingHandles(false)}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
+                  style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : meHasNoHandles ? (
+            <div
+              className="rounded-[14px] border px-4 py-3.5 flex items-center justify-between"
+              style={{ borderColor: "var(--line)", borderStyle: "dashed" }}
+            >
+              <p className="text-[13px]" style={{ color: "var(--ink-soft)" }}>
+                Add your Venmo or Cash App so crewmates can pay you
+              </p>
+              <button
+                onClick={openHandlesForm}
+                className="ml-3 flex-shrink-0 text-[13px] font-semibold transition hover:opacity-70"
+                style={{ color: "var(--coral)" }}
+              >
+                Add →
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-end">
+              <button
+                onClick={openHandlesForm}
+                className="text-[12px] font-semibold transition hover:opacity-70"
+                style={{ color: "var(--ink-soft)" }}
+              >
+                Edit payment handles
+              </button>
+            </div>
+          )}
+
           {/* Budget goal */}
           {editingBudget ? (
             <div
@@ -543,14 +797,9 @@ export default function TripDetailPage() {
                   Edit
                 </button>
               </div>
-
-              {/* Progress bar */}
-              <div className="flex items-baseline justify-between mb-1.5">
-                <span className="text-[22px] font-bold" style={{ fontFamily: "var(--font-bricolage)", color: "var(--ink)" }}>
-                  ${totalSpent.toFixed(2)}
-                </span>
-                <span className="text-[13px]" style={{ color: "var(--ink-soft)" }}>
-                  of ${trip.budget.toLocaleString()}
+              <div className="mb-1.5">
+                <span className="text-[22px] font-bold" style={{ fontFamily: "var(--font-bricolage)", color: remaining >= 0 ? "var(--ink)" : "var(--coral-deep)" }}>
+                  {remaining >= 0 ? `$${remaining.toFixed(2)} left` : `$${Math.abs(remaining).toFixed(2)} over`}
                 </span>
               </div>
               <div className="h-2.5 w-full rounded-full overflow-hidden" style={{ background: "var(--line)" }}>
@@ -564,11 +813,9 @@ export default function TripDetailPage() {
               </div>
               <p
                 className="mt-1.5 text-[12px] font-semibold"
-                style={{ color: remaining >= 0 ? "var(--ink-soft)" : "var(--coral-deep)" }}
+                style={{ color: "var(--ink-soft)" }}
               >
-                {remaining >= 0
-                  ? `$${remaining.toFixed(2)} left to spend`
-                  : `$${Math.abs(remaining).toFixed(2)} over budget`}
+                You&apos;ve spent ${totalSpent.toFixed(2)} of ${trip.budget.toLocaleString()}
               </p>
             </div>
           ) : (
@@ -621,7 +868,6 @@ export default function TripDetailPage() {
               })}
             </div>
 
-            {/* Add expense form */}
             {addingExpense ? (
               <div
                 className="mt-3 rounded-[14px] border p-4 flex flex-col gap-3"
@@ -698,41 +944,363 @@ export default function TripDetailPage() {
                 Who owes the group pot
               </p>
               <div className="flex flex-col gap-2">
-                {balances.map((b, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-3 rounded-xl px-3.5 py-3"
-                    style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
-                  >
+                {balances.map((b, i) => {
+                  const amt = Math.abs(b.balance).toFixed(2);
+                  const venmoUrl = b.member.venmo_username
+                    ? `https://venmo.com/${b.member.venmo_username}?txn=pay&amount=${amt}&note=${note}`
+                    : null;
+                  const cashUrl = b.member.cashapp_cashtag
+                    ? `https://cash.app/$${b.member.cashapp_cashtag}/${amt}`
+                    : null;
+                  const isMe = b.member.id === userId;
+                  const owes = b.balance < 0;
+
+                  return (
                     <div
-                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
-                      style={{ background: AVATAR_COLORS[b.colorIdx % AVATAR_COLORS.length], fontFamily: "var(--font-bricolage)" }}
+                      key={i}
+                      className="rounded-xl px-3.5 py-3"
+                      style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
                     >
-                      {b.name[0].toUpperCase()}
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[13px] font-bold text-white"
+                          style={{ background: AVATAR_COLORS[b.colorIdx % AVATAR_COLORS.length], fontFamily: "var(--font-bricolage)" }}
+                        >
+                          {b.name[0].toUpperCase()}
+                        </div>
+                        <span className="flex-1 text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
+                          {b.name}
+                        </span>
+                        {b.balance === 0 ? (
+                          <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>settled ✓</span>
+                        ) : b.balance > 0 ? (
+                          <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>
+                            is owed ${b.balance.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-[13px] font-semibold" style={{ color: "var(--coral-deep)" }}>
+                            owes ${amt}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Pay buttons row — only for owing members */}
+                      {owes && (
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          {venmoUrl && (
+                            <a
+                              href={venmoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-[9px] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-85"
+                              style={{ background: "#3D95CE" }}
+                            >
+                              Venmo
+                            </a>
+                          )}
+                          {cashUrl && (
+                            <a
+                              href={cashUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-[9px] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:opacity-85"
+                              style={{ background: "#00D632" }}
+                            >
+                              Cash App
+                            </a>
+                          )}
+                          {!venmoUrl && !cashUrl && (
+                            isMe ? (
+                              <button
+                                onClick={openHandlesForm}
+                                className="text-[11px] font-semibold transition hover:opacity-70"
+                                style={{ color: "var(--coral)" }}
+                              >
+                                Add your handles so crewmates can pay you →
+                              </button>
+                            ) : (
+                              <span className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
+                                {b.name} hasn&apos;t added a payment handle yet
+                              </span>
+                            )
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="flex-1 text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
-                      {b.name}
-                    </span>
-                    {b.balance === 0 ? (
-                      <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>settled ✓</span>
-                    ) : b.balance > 0 ? (
-                      <span className="text-[13px] font-semibold" style={{ color: "var(--good)" }}>
-                        is owed ${b.balance.toFixed(2)}
-                      </span>
-                    ) : (
-                      <span className="text-[13px] font-semibold" style={{ color: "var(--coral-deep)" }}>
-                        owes ${Math.abs(b.balance).toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       )}
 
-      {(activeTab === "photos" || activeTab === "polls" || activeTab === "crew") && (
+      {activeTab === "polls" && (
+        <div className="mt-6 flex flex-col gap-4">
+
+          {/* Create poll form or button */}
+          {creatingPoll ? (
+            <div
+              className="rounded-[14px] border p-4 flex flex-col gap-3"
+              style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+            >
+              <input
+                type="text"
+                placeholder="Ask the group something…"
+                value={newPollQuestion}
+                onChange={e => setNewPollQuestion(e.target.value)}
+                autoFocus
+                className="rounded-xl border px-3.5 py-2.5 text-[14px] outline-none w-full font-semibold"
+                style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+              />
+              <div className="flex flex-col gap-2">
+                {newPollOptions.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={`Option ${i + 1}`}
+                      value={opt}
+                      onChange={e => {
+                        const updated = [...newPollOptions];
+                        updated[i] = e.target.value;
+                        setNewPollOptions(updated);
+                      }}
+                      className="flex-1 rounded-xl border px-3.5 py-2.5 text-[14px] outline-none"
+                      style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                    />
+                    {newPollOptions.length > 2 && (
+                      <button
+                        onClick={() => setNewPollOptions(prev => prev.filter((_, j) => j !== i))}
+                        className="flex-shrink-0 text-[18px] leading-none transition hover:opacity-80"
+                        style={{ color: "var(--ink-soft)", opacity: 0.4 }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => setNewPollOptions(prev => [...prev, ""])}
+                  className="text-left text-[13px] font-semibold transition hover:opacity-70 px-1"
+                  style={{ color: "var(--ink-soft)" }}
+                >
+                  + Add option
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreatePoll}
+                  disabled={!newPollQuestion.trim() || newPollOptions.filter(o => o.trim()).length < 2}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                  style={{ background: "var(--coral)" }}
+                >
+                  Create poll
+                </button>
+                <button
+                  onClick={() => { setCreatingPoll(false); setNewPollQuestion(""); setNewPollOptions(["", ""]); }}
+                  className="flex-1 rounded-[11px] py-2.5 text-[14px] font-semibold transition hover:opacity-70"
+                  style={{ border: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setCreatingPoll(true)}
+              className="w-full rounded-[13px] py-3 text-[14px] font-semibold transition hover:opacity-70"
+              style={{ border: "1.5px dashed var(--line)", color: "var(--ink-soft)" }}
+            >
+              + Create a poll
+            </button>
+          )}
+
+          {/* Poll cards */}
+          {polls.length === 0 && !creatingPoll && (
+            <p className="text-center text-[13px] py-4" style={{ color: "var(--ink-soft)" }}>
+              No polls yet — ask the group something!
+            </p>
+          )}
+          {polls.map(poll => {
+            const opts = pollOptions.filter(o => o.poll_id === poll.id);
+            const votes = pollVotes.filter(v => v.poll_id === poll.id);
+            const totalVotes = votes.length;
+            const myVote = votes.find(v => v.user_id === userId);
+            const maxCount = Math.max(...opts.map(o => votes.filter(v => v.option_id === o.id).length), 0);
+
+            return (
+              <div
+                key={poll.id}
+                className="rounded-[14px] border overflow-hidden"
+                style={{ borderColor: "var(--line)", background: "var(--paper)" }}
+              >
+                {/* Question header */}
+                <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
+                  <p className="text-[15px] font-semibold leading-snug" style={{ color: "var(--ink)" }}>
+                    {poll.question}
+                  </p>
+                  <button
+                    onClick={() => handleDeletePoll(poll.id)}
+                    className="flex-shrink-0 rounded-lg px-2.5 py-1 text-[12px] font-semibold transition hover:opacity-70"
+                    style={{ background: "var(--line)", color: "var(--ink-soft)" }}
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                {/* Options */}
+                <div className="flex flex-col gap-0 border-t" style={{ borderColor: "var(--line)" }}>
+                  {opts.map((opt, oi) => {
+                    const count = votes.filter(v => v.option_id === opt.id).length;
+                    const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                    const isLeading = count > 0 && count === maxCount;
+                    const isMine = myVote?.option_id === opt.id;
+                    const optionVoters = votes
+                      .filter(v => v.option_id === opt.id)
+                      .map(v => members.find(m => m.id === v.user_id))
+                      .filter(Boolean) as Member[];
+
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => handleVote(poll.id, opt.id)}
+                        className="relative text-left w-full transition"
+                        style={{
+                          borderTop: oi > 0 ? `1px solid var(--line)` : undefined,
+                        }}
+                      >
+                        {/* Fill bar */}
+                        <div
+                          className="absolute inset-0 transition-all duration-300"
+                          style={{
+                            width: `${pct}%`,
+                            background: isLeading ? "rgba(255,106,90,0.10)" : "rgba(230,221,207,0.5)",
+                          }}
+                        />
+                        <div className="relative px-4 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="text-[14px] leading-snug"
+                              style={{
+                                color: "var(--ink)",
+                                fontWeight: isLeading ? 600 : 400,
+                              }}
+                            >
+                              {opt.text}
+                            </span>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-[12px]" style={{ color: "var(--ink-soft)" }}>
+                                {pct}%
+                              </span>
+                              {isMine && (
+                                <span className="text-[13px] font-bold" style={{ color: "var(--coral)" }}>✓</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Voter avatars */}
+                          {optionVoters.length > 0 && (
+                            <div className="flex items-center mt-1.5">
+                              {optionVoters.map((voter, vi) => {
+                                const memberIdx = members.findIndex(m => m.id === voter.id);
+                                return (
+                                  <div
+                                    key={voter.id}
+                                    className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white border"
+                                    style={{
+                                      background: AVATAR_COLORS[memberIdx % AVATAR_COLORS.length],
+                                      borderColor: "var(--paper)",
+                                      marginLeft: vi === 0 ? 0 : -4,
+                                      fontFamily: "var(--font-bricolage)",
+                                    }}
+                                    title={voter.name ?? "?"}
+                                  >
+                                    {(voter.name ?? "?")[0].toUpperCase()}
+                                  </div>
+                                );
+                              })}
+                              <span className="ml-1.5 text-[11px]" style={{ color: "var(--ink-soft)" }}>
+                                {optionVoters.map(v => v.name ?? "?").join(", ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Total votes footer */}
+                <div className="px-4 py-2 border-t" style={{ borderColor: "var(--line)" }}>
+                  <p className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
+                    {totalVotes} {totalVotes === 1 ? "vote" : "votes"} · tap to vote
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {activeTab === "crew" && (
+        <div className="mt-6 flex flex-col gap-5">
+
+          {/* Member list */}
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.1em] mb-3" style={{ color: "var(--ink-soft)" }}>
+              {members.length} on the trip
+            </p>
+            <div className="rounded-[14px] border overflow-hidden" style={{ borderColor: "var(--line)", background: "var(--paper)" }}>
+              {members.map((m, i) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 px-4 py-3"
+                  style={{ borderTop: i > 0 ? "1px solid var(--line)" : undefined }}
+                >
+                  <div
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white"
+                    style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length], fontFamily: "var(--font-bricolage)" }}
+                  >
+                    {(m.name ?? "?")[0].toUpperCase()}
+                  </div>
+                  <span className="flex-1 text-[15px] font-semibold" style={{ color: "var(--ink)" }}>
+                    {m.name ?? "Unknown"}
+                  </span>
+                  {m.id === userId && (
+                    <span
+                      className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white"
+                      style={{ background: "var(--coral)" }}
+                    >
+                      You
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Invite section */}
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.1em] mb-2" style={{ color: "var(--ink-soft)" }}>
+              Invite your crew
+            </p>
+            <div
+              className="rounded-xl border px-3.5 py-3 text-[12px] break-all mb-3"
+              style={{ borderColor: "var(--line)", borderStyle: "dashed", color: "var(--ink-soft)" }}
+            >
+              {typeof window !== "undefined" ? `${window.location.origin}/join/${trip.invite_code}` : `/join/${trip.invite_code}`}
+            </div>
+            <button
+              onClick={copyInviteLink}
+              className="w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98]"
+              style={{ background: copied ? "var(--good)" : "var(--coral)" }}
+            >
+              {copied ? "✓ Link copied!" : "Copy invite link"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "photos" && (
         <div className="mt-8 rounded-2xl border px-5 py-10 text-center"
           style={{ borderColor: "var(--line)", borderStyle: "dashed" }}>
           <p className="text-[14px]" style={{ color: "var(--ink-soft)" }}>Coming soon</p>
