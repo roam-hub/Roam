@@ -94,7 +94,7 @@ export default function Home() {
             Roam
           </p>
           <h1 className="mt-1.5 text-center text-5xl leading-[1.08]" style={{ color: "var(--ink)" }}>
-            Group trips,<br />sorted.
+            Group trips,<br />made easy.
           </h1>
           <p className="mt-3 max-w-xs text-center text-[15px]" style={{ color: "var(--ink-soft)" }}>
             Plan it, split it, settle up — all in one place.
