@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type Screen = "email" | "sent" | "name";
 
-export default function Home() {
+function HomeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [screen, setScreen] = useState<Screen>("email");
@@ -21,8 +21,6 @@ export default function Home() {
       return;
     }
 
-    // If Supabase redirects back here with a session (magic link flow),
-    // pick it up and navigate to the right screen
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session) {
@@ -192,5 +190,13 @@ export default function Home() {
         </>
       )}
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
   );
 }
