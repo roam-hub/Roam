@@ -53,7 +53,7 @@ function HomeInner() {
       },
     });
     setLoading(false);
-    if (error) { setError(error.message); return; }
+    if (error) { setError(error.message || JSON.stringify(error)); return; }
     setScreen("sent");
   }
 
