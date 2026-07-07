@@ -24,8 +24,11 @@ export default function JoinPage() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [inviterName, setInviterName] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [screen, setScreen] = useState<"auth" | "name">("auth");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signup");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -58,20 +61,54 @@ export default function JoinPage() {
     load();
   }, [code, router]);
 
-  async function handleSendLink() {
+  async function joinTrip(userId: string) {
+    if (!trip) return;
+    await supabase.from("trip_members").upsert(
+      { trip_id: trip.id, user_id: userId },
+      { onConflict: "trip_id,user_id" }
+    );
+    router.push(`/trips/${trip.id}`);
+  }
+
+  async function handleSignIn() {
     setError("");
     setLoading(true);
-    const redirectTo = `${window.location.origin}/auth/callback?invite=${code}`;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: true, emailRedirectTo: redirectTo },
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    if (data.user) await joinTrip(data.user.id);
+  }
+
+  async function handleSignUp() {
+    setError("");
+    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    if (data.user) {
+      const { data: existing } = await supabase
+        .from("users").select("name").eq("id", data.user.id).single();
+      if (existing?.name) {
+        await joinTrip(data.user.id);
+      } else {
+        setScreen("name");
+      }
+    }
+  }
+
+  async function handleSaveName() {
+    setError("");
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    await supabase.from("users").upsert({
+      id: session.user.id,
+      email: session.user.email,
+      name: name.trim(),
     });
     setLoading(false);
-    if (error) {
-      setError(error.message || error.status?.toString() || "Something went wrong — please try again.");
-      return;
-    }
-    setSent(true);
+    await joinTrip(session.user.id);
   }
 
   const fromLabel = trip?.travel_mode === "drive" ? (trip.from_city ?? trip?.from_code) : trip?.from_code;
@@ -145,41 +182,77 @@ export default function JoinPage() {
         )}
       </div>
 
-      {/* Email form */}
-      {sent ? (
-        <div className="text-center">
-          <p className="text-[28px] mb-2">📬</p>
-          <p className="font-semibold text-[17px]" style={{ color: "var(--ink)" }}>Check your inbox!</p>
-          <p className="mt-2 text-[14px]" style={{ color: "var(--ink-soft)" }}>
-            We sent a sign-in link to <strong>{email}</strong>.<br />Click it and you&apos;ll land straight in the trip.
+      {/* Auth / name form */}
+      {screen === "name" ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-[13px] text-center font-semibold" style={{ color: "var(--ink)" }}>
+            One last thing — what should the crew call you?
           </p>
+          <input type="text" placeholder="e.g. Alex"
+            value={name} onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSaveName()}
+            autoFocus
+            className="w-full rounded-xl border px-3.5 py-3 text-[15px] outline-none"
+            style={{ borderColor: "var(--line)", color: "var(--ink)" }} />
+          {error && <p className="text-center text-xs text-red-500">{error}</p>}
+          <button onClick={handleSaveName}
+            disabled={loading || !name.trim()}
+            className="w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
+            style={{ background: "var(--coral)" }}>
+            {loading ? "Joining…" : "Join the trip →"}
+          </button>
         </div>
       ) : (
-        <>
-          <label className="mb-1.5 block text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
-            Your email address
-          </label>
-          <input
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className="w-full rounded-xl border px-3.5 py-3 text-[15px] outline-none"
-            style={{ borderColor: "var(--line)", color: "var(--ink)" }}
-          />
-          {error && <p className="mt-2 text-center text-xs text-red-500">{error}</p>}
+        <div className="flex flex-col gap-3">
+          {/* Sign in / Sign up toggle */}
+          <div className="flex gap-2 mb-1">
+            <button
+              onClick={() => { setAuthMode("signup"); setError(""); }}
+              className="flex-1 rounded-[10px] py-2 text-[13px] font-semibold transition"
+              style={{
+                background: authMode === "signup" ? "var(--coral)" : "transparent",
+                color: authMode === "signup" ? "white" : "var(--ink-soft)",
+                border: authMode === "signup" ? "none" : "1px solid var(--line)",
+              }}>
+              New to Roam
+            </button>
+            <button
+              onClick={() => { setAuthMode("signin"); setError(""); }}
+              className="flex-1 rounded-[10px] py-2 text-[13px] font-semibold transition"
+              style={{
+                background: authMode === "signin" ? "var(--coral)" : "transparent",
+                color: authMode === "signin" ? "white" : "var(--ink-soft)",
+                border: authMode === "signin" ? "none" : "1px solid var(--line)",
+              }}>
+              I have an account
+            </button>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Email</label>
+            <input type="email" inputMode="email" placeholder="you@example.com"
+              value={email} onChange={e => setEmail(e.target.value)}
+              className="w-full rounded-xl border px-3.5 py-3 text-[15px] outline-none"
+              style={{ borderColor: "var(--line)", color: "var(--ink)" }} />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Password</label>
+            <input type="password"
+              placeholder={authMode === "signup" ? "At least 6 characters" : "••••••••"}
+              value={password} onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && (authMode === "signin" ? handleSignIn() : handleSignUp())}
+              className="w-full rounded-xl border px-3.5 py-3 text-[15px] outline-none"
+              style={{ borderColor: "var(--line)", color: "var(--ink)" }} />
+          </div>
+          {error && <p className="text-center text-xs text-red-500">{error}</p>}
           <button
-            onClick={handleSendLink}
-            disabled={loading || !email.includes("@")}
-            className="mt-3.5 w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
-            style={{ background: "var(--coral)" }}
-          >
-            {loading ? "Sending…" : "Join the trip →"}
+            onClick={authMode === "signin" ? handleSignIn : handleSignUp}
+            disabled={loading || !email.includes("@") || !password}
+            className="w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40"
+            style={{ background: "var(--coral)" }}>
+            {loading ? "Joining…" : "Join the trip →"}
           </button>
-          <p className="mt-3 text-center text-[12px]" style={{ color: "var(--ink-soft)" }}>
-            We&apos;ll email you a link — no password needed.
-          </p>
-        </>
+        </div>
       )}
     </main>
   );
