@@ -207,6 +207,28 @@ export default function TripDetailPage() {
       })
       .subscribe();
 
+    const membersChannel = supabase
+      .channel(`members:${id}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "trip_members",
+        filter: `trip_id=eq.${id}`,
+      }, async (payload) => {
+        const newUserId = (payload.new as { user_id: string }).user_id;
+        const { data: userData } = await supabase
+          .from("users")
+          .select("id, name, venmo_username, cashapp_cashtag")
+          .eq("id", newUserId)
+          .single();
+        if (userData) {
+          setMembers(prev =>
+            prev.some(m => m.id === userData.id) ? prev : [...prev, userData]
+          );
+        }
+      })
+      .subscribe();
+
     const pollsChannel = supabase
       .channel(`polls:${id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "polls",
@@ -245,6 +267,7 @@ export default function TripDetailPage() {
     return () => {
       supabase.removeChannel(itinChannel);
       supabase.removeChannel(budgetChannel);
+      supabase.removeChannel(membersChannel);
       supabase.removeChannel(pollsChannel);
     };
   }, [id, router]);
