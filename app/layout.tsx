@@ -41,6 +41,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${bricolage.variable} ${instrumentSans.variable} h-full antialiased`}>
       <head>
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <script dangerouslySetInnerHTML={{
           __html: `if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');`
         }} />
