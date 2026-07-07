@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import InstallPrompt from "@/components/InstallPrompt";
 
 type Trip = {
   id: string;
@@ -126,13 +127,16 @@ export default function TripsPage() {
       )}
 
       {/* CTA */}
-      <button
-        onClick={() => router.push("/trips/new")}
-        className="mt-6 w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98]"
-        style={{ background: "var(--coral)" }}
-      >
-        {trips.length > 0 ? "+ New trip" : "Start a trip"}
-      </button>
+      <div className="mt-6 flex flex-col gap-3">
+        <button
+          onClick={() => router.push("/trips/new")}
+          className="w-full rounded-[13px] py-3.5 text-[15px] font-semibold text-white transition hover:opacity-90 active:scale-[0.98]"
+          style={{ background: "var(--coral)" }}
+        >
+          {trips.length > 0 ? "+ New trip" : "Start a trip"}
+        </button>
+        <InstallPrompt />
+      </div>
     </main>
   );
 }
