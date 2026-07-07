@@ -11,14 +11,23 @@ export default function AppleIcon() {
           width: 180,
           height: 180,
           background: "#ff6a5a",
-          borderRadius: 40,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 90,
         }}
       >
-        ✈
+        <span
+          style={{
+            color: "#ffffff",
+            fontSize: 110,
+            fontWeight: 800,
+            fontFamily: "serif",
+            lineHeight: 1,
+            marginTop: 8,
+          }}
+        >
+          R
+        </span>
       </div>
     ),
     { ...size }
