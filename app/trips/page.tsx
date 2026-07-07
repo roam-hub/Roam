@@ -51,26 +51,23 @@ export default function TripsPage() {
     load();
   }, [router]);
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/");
-  }
-
   return (
     <main className="flex min-h-screen flex-col px-4 py-10 max-w-sm mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] mb-0.5"
-          style={{ color: "var(--ink-soft)" }}>
-          Hi {userName || "there"} 👋
-        </p>
-        <h1 className="text-[30px] font-bold leading-tight" style={{ color: "var(--ink)" }}>Your trips</h1>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] mb-0.5"
+            style={{ color: "var(--ink-soft)" }}>
+            Hi {userName || "there"} 👋
+          </p>
+          <h1 className="text-[30px] font-bold leading-tight" style={{ color: "var(--ink)" }}>Your trips</h1>
+        </div>
         <button
-          onClick={handleSignOut}
-          className="mt-2 text-[11px] font-semibold px-2.5 py-1 rounded-md transition hover:opacity-70"
-          style={{ color: "var(--ink-soft)", border: "1px solid var(--line)" }}
+          onClick={() => router.push("/profile")}
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[15px] font-bold text-white transition hover:opacity-80"
+          style={{ background: "var(--coral)", fontFamily: "var(--font-bricolage)" }}
         >
-          Sign out
+          {userName ? userName[0].toUpperCase() : "?"}
         </button>
       </div>
 
