@@ -1,83 +1,48 @@
-import { createCanvas } from "canvas";
+import sharp from "sharp";
 import { writeFileSync } from "fs";
 
-function makeIcon(size) {
-  const canvas = createCanvas(size, size);
-  const ctx = canvas.getContext("2d");
-  const r = size * 0.22;
+// Clean top-down airplane silhouette as SVG path (scaled to 100x100 viewBox)
+const planePath = `
+  M50 8
+  C52 8 54 10 54 12
+  L54 38
+  L78 52
+  L78 58
+  L54 52
+  L54 68
+  L62 72
+  L62 76
+  L50 73
+  L38 76
+  L38 72
+  L46 68
+  L46 52
+  L22 58
+  L22 52
+  L46 38
+  L46 12
+  C46 10 48 8 50 8
+  Z
+`;
 
-  // Coral/orange background with rounded corners
-  ctx.fillStyle = "#ff6a5a";
-  ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(size - r, 0);
-  ctx.quadraticCurveTo(size, 0, size, r);
-  ctx.lineTo(size, size - r);
-  ctx.quadraticCurveTo(size, size, size - r, size);
-  ctx.lineTo(r, size);
-  ctx.quadraticCurveTo(0, size, 0, size - r);
-  ctx.lineTo(0, r);
-  ctx.quadraticCurveTo(0, 0, r, 0);
-  ctx.closePath();
-  ctx.fill();
-
-  // Draw white plane, centered, angled 45° up-right
-  const cx = size / 2;
-  const cy = size / 2;
-  const s = size * 0.52; // scale
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-Math.PI / 4); // 45° tilt (nose points up-right)
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-
-  // Fuselage (tall narrow rounded body)
-  const fw = s * 0.18;
-  const fh = s * 0.72;
-  ctx.roundRect(-fw / 2, -fh / 2, fw, fh, fw / 2);
-  ctx.fill();
-
-  // Nose cone on top
-  ctx.beginPath();
-  ctx.moveTo(-fw / 2, -fh / 2);
-  ctx.quadraticCurveTo(-fw / 2, -fh / 2 - s * 0.18, 0, -fh / 2 - s * 0.24);
-  ctx.quadraticCurveTo(fw / 2, -fh / 2 - s * 0.18, fw / 2, -fh / 2);
-  ctx.closePath();
-  ctx.fill();
-
-  // Main wings (wide swept)
-  ctx.beginPath();
-  ctx.moveTo(-fw / 2, -fh * 0.08);
-  ctx.lineTo(-s * 0.52, s * 0.16);
-  ctx.lineTo(-s * 0.42, s * 0.2);
-  ctx.lineTo(-fw / 2, s * 0.04);
-  ctx.lineTo(fw / 2, s * 0.04);
-  ctx.lineTo(s * 0.42, s * 0.2);
-  ctx.lineTo(s * 0.52, s * 0.16);
-  ctx.lineTo(fw / 2, -fh * 0.08);
-  ctx.closePath();
-  ctx.fill();
-
-  // Tail fins
-  ctx.beginPath();
-  ctx.moveTo(-fw / 2, fh * 0.28);
-  ctx.lineTo(-s * 0.26, fh * 0.44);
-  ctx.lineTo(-s * 0.2, fh * 0.48);
-  ctx.lineTo(-fw / 2, fh * 0.38);
-  ctx.lineTo(fw / 2, fh * 0.38);
-  ctx.lineTo(s * 0.2, fh * 0.48);
-  ctx.lineTo(s * 0.26, fh * 0.44);
-  ctx.lineTo(fw / 2, fh * 0.28);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.restore();
-
-  return canvas.toBuffer("image/png");
+function makeSVG(size) {
+  const r = Math.round(size * 0.22);
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+  <rect width="${size}" height="${size}" rx="${r}" fill="#ff6a5a"/>
+  <g transform="translate(${size / 2}, ${size / 2}) rotate(-45) scale(${size / 115})">
+    <path d="${planePath}" fill="white" transform="translate(-50, -50)"/>
+  </g>
+</svg>`.trim();
 }
 
-writeFileSync("public/icon-192.png", makeIcon(192));
-writeFileSync("public/icon-512.png", makeIcon(512));
-writeFileSync("public/apple-touch-icon.png", makeIcon(180));
-console.log("Icons written to public/");
+async function writeIcon(path, size) {
+  await sharp(Buffer.from(makeSVG(size)))
+    .png()
+    .toFile(path);
+  console.log(`Written: ${path}`);
+}
+
+await writeIcon("public/icon-192.png", 192);
+await writeIcon("public/icon-512.png", 512);
+await writeIcon("public/apple-touch-icon.png", 180);
