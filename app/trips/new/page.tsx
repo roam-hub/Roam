@@ -72,7 +72,7 @@ function DestinationPicker({
         >
           {results.map(d => (
             <button
-              key={d.code}
+              key={d.city + d.code}
               type="button"
               onMouseDown={() => pick(d)}
               className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-[#fff0ec]"
