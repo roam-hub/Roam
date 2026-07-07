@@ -6,6 +6,7 @@ export type Destination = {
 
 export const DESTINATIONS: Destination[] = [
   { city: "Raleigh", sub: "North Carolina, USA", code: "RDU" },
+  { city: "Charlotte", sub: "North Carolina, USA", code: "CLT" },
   { city: "Gatlinburg", sub: "Tennessee, USA", code: "TYS" },
   { city: "Asheville", sub: "North Carolina, USA", code: "AVL" },
   { city: "Charleston", sub: "South Carolina, USA", code: "CHS" },
