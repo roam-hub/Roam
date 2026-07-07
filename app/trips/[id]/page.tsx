@@ -737,21 +737,33 @@ export default function TripDetailPage() {
               </div>
             </div>
           ) : meHasNoHandles ? (
-            <div
-              className="rounded-[14px] border px-4 py-3.5 flex items-center justify-between"
+            <button
+              onClick={openHandlesForm}
+              className="rounded-[14px] border px-4 py-3.5 flex items-center justify-between w-full transition hover:opacity-80"
               style={{ borderColor: "var(--line)", borderStyle: "dashed" }}
             >
               <p className="text-[13px]" style={{ color: "var(--ink-soft)" }}>
-                Add your Venmo or Cash App so crewmates can pay you
+                Add handles so crewmates can pay you
               </p>
-              <button
-                onClick={openHandlesForm}
-                className="ml-3 flex-shrink-0 text-[13px] font-semibold transition hover:opacity-70"
-                style={{ color: "var(--coral)" }}
-              >
-                Add →
-              </button>
-            </div>
+              <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                {/* Venmo pill */}
+                <span
+                  className="flex items-center gap-1 rounded-[7px] px-2 py-1 text-[11px] font-bold text-white"
+                  style={{ background: "#3D95CE" }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M20.4 2c.8 1.3 1.2 2.7 1.2 4.5 0 5.6-4.8 12.9-8.7 18H4.8L1.6 2.8l7.3-.7 1.8 14.3C12.5 13 14.5 8 14.5 5c0-1.2-.2-2-.5-2.8L20.4 2z"/></svg>
+                  Venmo
+                </span>
+                {/* Cash App pill */}
+                <span
+                  className="flex items-center gap-1 rounded-[7px] px-2 py-1 text-[11px] font-bold text-white"
+                  style={{ background: "#00C244" }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M14.5 9.1c-.4-.2-1.3-.5-2-.7l-.1-2.1c.7.1 1.5.4 2.1.8l.8-1.8C14.6 4.9 13.5 4.5 12.3 4.4l-.1-1.4H11l.1 1.5c-1.9.3-3.1 1.5-3.1 3.1 0 1.7 1.1 2.5 2.9 3.1l.2 2.4c-.9-.1-1.8-.5-2.6-1.1l-.9 1.8c.9.7 2.1 1.1 3.4 1.2l.1 1.5h1.2l-.1-1.5c2-.3 3.2-1.5 3.2-3.2 0-1.7-1-2.5-2.9-3.2zm-2.7-.5c-.8-.3-1.2-.6-1.2-1.2s.4-1 1.1-1.1l.1 2.3zm1.6 4.6l-.1-2.4c.8.3 1.2.6 1.2 1.2s-.4 1-1.1 1.2z"/></svg>
+                  Cash App
+                </span>
+              </div>
+            </button>
           ) : (
             <div className="flex justify-end">
               <button
