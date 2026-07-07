@@ -59,17 +59,17 @@ export default function TripsPage() {
   return (
     <main className="flex min-h-screen flex-col px-4 py-10 max-w-sm mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.14em]"
+          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] mb-0.5"
             style={{ color: "var(--ink-soft)" }}>
             Hi {userName || "there"} 👋
           </p>
-          <h1 className="text-[26px]" style={{ color: "var(--ink)" }}>Your trips</h1>
+          <h1 className="text-[30px] font-bold leading-tight" style={{ color: "var(--ink)" }}>Your trips</h1>
         </div>
         <button
           onClick={handleSignOut}
-          className="text-[12px] font-semibold px-3 py-1.5 rounded-lg transition hover:opacity-70"
+          className="mt-1 text-[12px] font-semibold px-3.5 py-1.5 rounded-lg transition hover:opacity-70 flex-shrink-0"
           style={{ color: "var(--ink-soft)", border: "1px solid var(--line)" }}
         >
           Sign out
