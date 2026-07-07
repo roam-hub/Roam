@@ -972,7 +972,7 @@ export default function TripDetailPage() {
                 {balances.map((b, i) => {
                   const amt = Math.abs(b.balance).toFixed(2);
                   const venmoUrl = b.member.venmo_username
-                    ? `https://venmo.com/${b.member.venmo_username}?txn=pay&amount=${amt}&note=${note}`
+                    ? `venmo://paycharge?txn=pay&recipients=${b.member.venmo_username}&amount=${amt}&note=${decodeURIComponent(note)}`
                     : null;
                   const cashUrl = b.member.cashapp_cashtag
                     ? `https://cash.app/$${b.member.cashapp_cashtag}/${amt}`
