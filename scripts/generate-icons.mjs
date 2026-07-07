@@ -1,30 +1,24 @@
 import sharp from "sharp";
-import { writeFileSync } from "fs";
 
-// Material Design "flight" icon — clean top-down airplane, 24x24 viewBox, pointing up
-// Rotated -45° so it points up-right
-const MD_FLIGHT = `M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z`;
+const SRC = "./scripts/source-icon.png";
 
-function makeSVG(size) {
-  const r = Math.round(size * 0.22);
-  // Scale so plane fills ~52% of icon
-  const scale = (size * 0.52) / 24;
-  const cx = size / 2;
-  const cy = size / 2;
+const trimmed = await sharp(SRC)
+  .trim({ background: "#e5e5ea", threshold: 40 })
+  .toBuffer({ resolveWithObject: true });
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-  <rect width="${size}" height="${size}" rx="${r}" fill="#1b2640"/>
-  <g transform="translate(${cx},${cy}) rotate(-45) scale(${scale}) translate(-12,-12)">
-    <path d="${MD_FLIGHT}" fill="white"/>
-  </g>
-</svg>`;
+console.log(`Trimmed to: ${trimmed.info.width}x${trimmed.info.height}`);
+
+// Composite onto a solid navy background so rounded-corner grey becomes navy
+async function makeIcon(destPath, size) {
+  await sharp(trimmed.data)
+    .resize(size, size)
+    .flatten({ background: "#1b2640" })
+    .png()
+    .toFile(destPath);
 }
 
-async function writeIcon(path, size) {
-  await sharp(Buffer.from(makeSVG(size))).png().toFile(path);
-  console.log(`Written: ${path}`);
-}
+await makeIcon("public/icon-512.png", 512);
+await makeIcon("public/icon-192.png", 192);
+await makeIcon("public/apple-touch-icon.png", 180);
 
-await writeIcon("public/icon-192.png", 192);
-await writeIcon("public/icon-512.png", 512);
-await writeIcon("public/apple-touch-icon.png", 180);
+console.log("Written: public/icon-512.png, icon-192.png, apple-touch-icon.png");
