@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Instrument_Sans } from "next/font/google";
 import "./globals.css";
 
@@ -17,6 +17,20 @@ const instrumentSans = Instrument_Sans({
 export const metadata: Metadata = {
   title: "Roam — Group trips, sorted.",
   description: "Plan it, split it, settle up — all in one place.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Roam",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ff6a5a",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -26,6 +40,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${bricolage.variable} ${instrumentSans.variable} h-full antialiased`}>
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');`
+        }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
